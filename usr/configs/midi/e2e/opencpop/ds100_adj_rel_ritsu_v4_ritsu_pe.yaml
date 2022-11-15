@@ -1,0 +1,48 @@
+base_config:
+  - usr/configs/popcs_ds_beta6.yaml
+  - usr/configs/midi/cascade/opencs/opencpop_statis.yaml
+
+binarizer_cls: data_gen.singing.binarize.NamineRitsuOpencpopBinarizer
+binary_data_dir: 'data/binary/ritsu-24k-midi-dp'
+
+#switch_midi2f0_step: 174000
+use_midi: true  #  for midi exp
+use_gt_dur: false  # for further midi exp
+lambda_ph_dur: 1.0
+lambda_sent_dur: 1.0
+lambda_word_dur: 0.0
+predictor_grad: 0.1
+dur_predictor_layers: 5  # *
+
+
+fs2_ckpt: ''  #
+#num_valid_plots: 0
+task_cls: usr.diffsinger_task.DiffSingerMIDITask
+
+# NOTE: Universal vocoder provided by the DiffSinger's authors
+vocoder: vocoders.hifigan.HifiGAN
+vocoder_ckpt: checkpoints/0109_hifigan_bigpopcs_hop128
+# NOTE: we found that training a vocoder on Ritsu's database worked better.
+# vocoder: TBD
+# vocoder_ckpt: TBD
+
+K_step: 100
+max_tokens: 40000
+max_updates: 200000
+gaussian_start: True
+
+use_pitch_embed: false
+use_gt_f0: false  #  for midi exp
+
+lambda_f0: 0.
+lambda_uv: 0.
+dilation_cycle_length: 4  # *
+rel_pos: true
+predictor_layers: 5
+pe_enable: true
+# NOTE: uncomment the following line if you want to use the pre-trained univeral pitch extractor
+# provided by the DiffSinger authors
+# pe_ckpt: 'checkpoints/0102_xiaoma_pe'
+# NOTE: For our experiments, we found that training a pitch extractor on Ritsu's database worked better
+pe_ckpt: 'checkpoints/0923_ritsu_pe'
+
