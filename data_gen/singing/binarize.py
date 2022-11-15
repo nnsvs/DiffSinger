@@ -394,5 +394,96 @@ class OpencpopBinarizer(MidiSingingBinarizer):
         return res
 
 
+# OpenCpop-like binarizer for Namine Ritsu's dataset.
+class NamineRitsuOpencpopBinarizer(MidiSingingBinarizer):
+    item2midi = {}
+    item2midi_dur = {}
+    item2is_slur = {}
+    item2ph_durs = {}
+    item2wdb = {}
+
+    def split_train_test_set(self, item_names):
+        item_names = deepcopy(item_names)
+        test_item_names = [x for x in item_names if any([x.startswith(ts) for ts in hparams['test_prefixes']])]
+        train_item_names = [x for x in item_names if x not in set(test_item_names)]
+        logging.info("train {}".format(len(train_item_names)))
+        logging.info("test {}".format(len(test_item_names)))
+        return train_item_names, test_item_names
+
+    def load_meta_data(self):
+        raw_data_dir = hparams['raw_data_dir']
+        utterance_labels = open(os.path.join(raw_data_dir, 'transcriptions.txt')).readlines()
+
+        for utterance_label in utterance_labels:
+            song_info = utterance_label.split('|')
+            item_name = song_info[0]
+            self.item2wavfn[item_name] = f'{raw_data_dir}/wavs/{item_name}.wav'
+            self.item2txt[item_name] = song_info[1]
+
+            self.item2ph[item_name] = song_info[2]
+            self.item2wdb[item_name] = [1 if x in ALL_YUNMU + ['AP', 'SP'] else 0 for x in song_info[2].split()]
+            self.item2ph_durs[item_name] = [float(x) for x in song_info[5].split(" ")]
+
+            self.item2midi[item_name] = [int(n) for n in song_info[3].split(" ")]
+            self.item2midi_dur[item_name] = [float(x) for x in song_info[4].split(" ")]
+            self.item2is_slur[item_name] = [int(x) for x in song_info[6].split(" ")]
+            self.item2spk[item_name] = 'opencpop'
+
+        print('spkers: ', set(self.item2spk.values()))
+        self.item_names = sorted(list(self.item2txt.keys()))
+        if self.binarization_args['shuffle']:
+            random.seed(1234)
+            random.shuffle(self.item_names)
+        self._train_item_names, self._test_item_names = self.split_train_test_set(self.item_names)
+
+    @staticmethod
+    def get_pitch(wav_fn, wav, spec, ph, res):
+        wav_suffix = '.wav'
+        wav_dir = 'wavs'
+        f0_dir = 'text_f0_align'
+
+        item_name = os.path.splitext(os.path.basename(wav_fn))[0]
+        res['pitch_midi'] = np.asarray(OpencpopBinarizer.item2midi[item_name])
+        res['midi_dur'] = np.asarray(OpencpopBinarizer.item2midi_dur[item_name])
+        res['is_slur'] = np.asarray(OpencpopBinarizer.item2is_slur[item_name])
+        res['word_boundary'] = np.asarray(OpencpopBinarizer.item2wdb[item_name])
+        assert res['pitch_midi'].shape == res['midi_dur'].shape == res['is_slur'].shape, (res['pitch_midi'].shape, res['midi_dur'].shape, res['is_slur'].shape)
+
+        # gt f0.
+        gt_f0, gt_pitch_coarse = get_pitch(wav, spec, hparams)
+        if sum(gt_f0) == 0:
+            raise BinarizationError("Empty **gt** f0")
+        res['f0'] = gt_f0
+        res['pitch'] = gt_pitch_coarse
+
+    @classmethod
+    def process_item(cls, item_name, ph, txt, tg_fn, wav_fn, spk_id, encoder, binarization_args):
+        if hparams['vocoder'] in VOCODERS:
+            wav, mel = VOCODERS[hparams['vocoder']].wav2spec(wav_fn)
+        else:
+            wav, mel = VOCODERS[hparams['vocoder'].split('.')[-1]].wav2spec(wav_fn)
+        res = {
+            'item_name': item_name, 'txt': txt, 'ph': ph, 'mel': mel, 'wav': wav, 'wav_fn': wav_fn,
+            'sec': len(wav) / hparams['audio_sample_rate'], 'len': mel.shape[0], 'spk_id': spk_id
+        }
+
+        try:
+            if binarization_args['with_f0']:
+                cls.get_pitch(wav_fn, wav, mel, ph, res)
+            if binarization_args['with_txt']:
+                try:
+                    phone_encoded = res['phone'] = encoder.encode(ph)
+                except:
+                    traceback.print_exc()
+                    raise BinarizationError(f"Empty phoneme")
+                if binarization_args['with_align']:
+                    cls.get_align(OpencpopBinarizer.item2ph_durs[item_name], mel, phone_encoded, res)
+        except BinarizationError as e:
+            print(f"| Skip item ({e}). item_name: {item_name}, wav_fn: {wav_fn}")
+            return None
+        return res
+
+
+
 if __name__ == "__main__":
     SingingBinarizer().process()
