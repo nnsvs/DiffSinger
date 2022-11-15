@@ -443,10 +443,10 @@ class NamineRitsuOpencpopBinarizer(MidiSingingBinarizer):
         f0_dir = 'text_f0_align'
 
         item_name = os.path.splitext(os.path.basename(wav_fn))[0]
-        res['pitch_midi'] = np.asarray(OpencpopBinarizer.item2midi[item_name])
-        res['midi_dur'] = np.asarray(OpencpopBinarizer.item2midi_dur[item_name])
-        res['is_slur'] = np.asarray(OpencpopBinarizer.item2is_slur[item_name])
-        res['word_boundary'] = np.asarray(OpencpopBinarizer.item2wdb[item_name])
+        res['pitch_midi'] = np.asarray(NamineRitsuOpencpopBinarizer.item2midi[item_name])
+        res['midi_dur'] = np.asarray(NamineRitsuOpencpopBinarizer.item2midi_dur[item_name])
+        res['is_slur'] = np.asarray(NamineRitsuOpencpopBinarizer.item2is_slur[item_name])
+        res['word_boundary'] = np.asarray(NamineRitsuOpencpopBinarizer.item2wdb[item_name])
         assert res['pitch_midi'].shape == res['midi_dur'].shape == res['is_slur'].shape, (res['pitch_midi'].shape, res['midi_dur'].shape, res['is_slur'].shape)
 
         # gt f0.
@@ -477,7 +477,7 @@ class NamineRitsuOpencpopBinarizer(MidiSingingBinarizer):
                     traceback.print_exc()
                     raise BinarizationError(f"Empty phoneme")
                 if binarization_args['with_align']:
-                    cls.get_align(OpencpopBinarizer.item2ph_durs[item_name], mel, phone_encoded, res)
+                    cls.get_align(NamineRitsuOpencpopBinarizer.item2ph_durs[item_name], mel, phone_encoded, res)
         except BinarizationError as e:
             print(f"| Skip item ({e}). item_name: {item_name}, wav_fn: {wav_fn}")
             return None
