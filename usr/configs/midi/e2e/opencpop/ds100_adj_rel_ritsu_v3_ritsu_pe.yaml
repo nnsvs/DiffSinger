@@ -19,21 +19,9 @@ fs2_ckpt: ''  #
 #num_valid_plots: 0
 task_cls: usr.diffsinger_task.DiffSingerMIDITask
 
-# Using the custom hn-HiFiGAN trained for the Ritsu's database
-# we found that training a vocoder on Ritsu's database worked better than using the
-# universal vocoder provided by the DiffSinger's authors
-vocoder: vocoders.pwg.HnHiFiGAN
-vocoder_ckpt: checkpoints/0912_hnhifigan
-# The above directory should contain:
-# checkpoints/0912_hnhifigan/
-# ├── checkpoint-600000steps.pkl
-# ├── config.yml
-# ├── in_vocoder_scaler_mean.npy
-# ├── in_vocoder_scaler_scale.npy
-# └── in_vocoder_scaler_var.npy
-# Please check https://github.com/nnsvs/nnsvs/tree/master/recipes/namine_ritsu_utagoe_db/icassp2023-24k-mel-diffsinger-compat
-# if you want to train the vocoder yourself.
-# If you want to get a pre-trained model, please contact @r9y9.
+# NOTE: Universal vocoder provided by the DiffSinger's authors
+vocoder: vocoders.hifigan.HifiGAN
+vocoder_ckpt: checkpoints/0109_hifigan_bigpopcs_hop128
 
 K_step: 100
 max_tokens: 40000
