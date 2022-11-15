@@ -135,3 +135,119 @@ class PWG(BaseVocoder):
         mfcc_delta_delta = librosa.feature.delta(mfcc, order=2)
         mfcc = np.concatenate([mfcc, mfcc_delta, mfcc_delta_delta]).T
         return mfcc
+
+
+def load_hnhifigan_model(config_path, checkpoint_path, stats_path):
+    # load config
+    with open(config_path) as f:
+        config = yaml.load(f, Loader=yaml.Loader)
+
+    # setup
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+
+    # NOTE: the following fork must be installed
+    # https://github.com/nnsvs/ParallelWaveGAN
+    # NOTE: the model architecture is exactly the same as one used in DiffSinger.
+    # Since the DiffSinger auhors don't provide the code for training the vocoder,
+    # I made my custom impl to allow training the vocoder with the Parallel WaveGAN repo.
+    # That's the reason why we need this custom vocoder impl here.
+    from parallel_wavegan.models.hnhifigan import HnSincHifiGanGenerator
+    model = HnSincHifiGanGenerator(**config["generator_params"])
+
+    ckpt_dict = torch.load(checkpoint_path, map_location="cpu")
+    model.load_state_dict(torch.load(checkpoint_path, map_location="cpu")["model"]["generator"])
+    scaler = StandardScaler()
+
+    scaler.mean_ = np.load(stats_path.replace("stats.h5", "in_vocoder_scaler_mean.npy"))[:80]
+    scaler.scale_ = np.load(stats_path.replace("stats.h5", "in_vocoder_scaler_scale.npy"))[:80]
+
+    model.remove_weight_norm()
+    model = model.eval().to(device)
+    print(f"| Loaded model parameters from {checkpoint_path}.")
+    print(f"| PWG device: {device}.")
+    return model, scaler, config, device
+
+
+
+@register_vocoder
+class HnHiFiGAN(BaseVocoder):
+    def __init__(self):
+        if hparams['vocoder_ckpt'] == '':  # load LJSpeech PWG pretrained model
+            assert False, "must be specified explicitly"
+        else:
+            base_dir = hparams['vocoder_ckpt']
+            print(base_dir)
+            config_path = f'{base_dir}/config.yml' # NOTE: not .yaml
+            ckpt = sorted(glob.glob(f'{base_dir}/checkpoint-*steps.pkl'), key=
+            lambda x: int(re.findall(f'{base_dir}/checkpoint-(\d+)steps.pkl', x)[0]))[-1]
+            print('| load PWG: ', ckpt)
+            self.model, self.scaler, self.config, self.device = load_hnhifigan_model(
+                config_path=config_path,
+                checkpoint_path=ckpt,
+                stats_path=f'{base_dir}/stats.h5',
+            )
+
+    def spec2wav(self, mel, **kwargs):
+        # start generation
+        config = self.config
+        device = self.device
+        try:
+            pad_size = (config["generator_params"]["aux_context_window"],
+                        config["generator_params"]["aux_context_window"])
+        except KeyError:
+            pad_size = 0
+        c = mel
+        if self.scaler is not None:
+            c = self.scaler.transform(c)
+
+        with torch.no_grad():
+            z = torch.randn(1, 1, c.shape[0] * config["hop_size"]).to(device)
+            if pad_size > 0:
+                c = np.pad(c, (pad_size, (0, 0)), "edge")
+            c = torch.FloatTensor(c).unsqueeze(0).transpose(2, 1).to(device)
+            p = kwargs.get('f0')
+            f0 = kwargs.get('f0')
+            if f0 is not None and hparams.get('use_nsf'):
+                f0 = torch.FloatTensor(f0[None, :]).to(device)
+                y = self.model(c, f0).view(-1)
+            else:
+                y = self.model(c).view(-1)
+        wav_out = y.cpu().numpy()
+        return wav_out
+
+    @staticmethod
+    def wav2spec(wav_fn, return_linear=False):
+        from data_gen.tts.data_gen_utils import process_utterance
+        res = process_utterance(
+            wav_fn, fft_size=hparams['fft_size'],
+            hop_size=hparams['hop_size'],
+            win_length=hparams['win_size'],
+            num_mels=hparams['audio_num_mel_bins'],
+            fmin=hparams['fmin'],
+            fmax=hparams['fmax'],
+            sample_rate=hparams['audio_sample_rate'],
+            loud_norm=hparams['loud_norm'],
+            min_level_db=hparams['min_level_db'],
+            return_linear=return_linear, vocoder='pwg', eps=float(hparams.get('wav2spec_eps', 1e-10)))
+        if return_linear:
+            return res[0], res[1].T, res[2].T  # [T, 80], [T, n_fft]
+        else:
+            return res[0], res[1].T
+
+    @staticmethod
+    def wav2mfcc(wav_fn):
+        fft_size = hparams['fft_size']
+        hop_size = hparams['hop_size']
+        win_length = hparams['win_size']
+        sample_rate = hparams['audio_sample_rate']
+        wav, _ = librosa.core.load(wav_fn, sr=sample_rate)
+        mfcc = librosa.feature.mfcc(y=wav, sr=sample_rate, n_mfcc=13,
+                                    n_fft=fft_size, hop_length=hop_size,
+                                    win_length=win_length, pad_mode="constant", power=1.0)
+        mfcc_delta = librosa.feature.delta(mfcc, order=1)
+        mfcc_delta_delta = librosa.feature.delta(mfcc, order=2)
+        mfcc = np.concatenate([mfcc, mfcc_delta, mfcc_delta_delta]).T
+        return mfcc
